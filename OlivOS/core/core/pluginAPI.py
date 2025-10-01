@@ -26,6 +26,7 @@ import json
 import traceback
 import zipfile
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 
 if platform.system() == 'Windows':
     import tkinter
@@ -70,7 +71,7 @@ sys.path.append('./lib/DLLs')
 class shallow(OlivOS.API.Proc_templet):
     def __init__(self, Proc_name='native_plugin', scan_interval=0.001, dead_interval=1, rx_queue=None, tx_queue=None,
                  control_queue=None, logger_proc=None, debug_mode=False, plugin_func_dict=None, bot_info_dict=None,
-                 treading_mode='full', restart_gate=10000, enable_auto_restart=False):
+                 treading_mode='full', restart_gate=10000, enable_auto_restart=False, max_workers=50):
         OlivOS.API.Proc_templet.__init__(self, Proc_name=Proc_name, Proc_type='plugin', scan_interval=scan_interval,
                                          dead_interval=dead_interval, rx_queue=rx_queue, tx_queue=tx_queue,
                                          control_queue=control_queue, logger_proc=logger_proc)
@@ -84,6 +85,7 @@ class shallow(OlivOS.API.Proc_templet):
         self.Proc_config['ready_for_restart'] = False
         self.Proc_config['enable_auto_restart'] = enable_auto_restart
         self.Proc_config['step_to_restart'] = restart_gate
+        self.Proc_config['max_workers'] = max_workers
         self.Proc_data['plugin_func_dict'] = plugin_func_dict
         self.Proc_data['bot_info_dict'] = bot_info_dict
         self.Proc_data['main_tk'] = None
@@ -92,6 +94,13 @@ class shallow(OlivOS.API.Proc_templet):
         self.tx_queue = []
         self.menu_queue = []
         self.database = None
+        # 创建线程池用于处理消息
+        self.thread_pool = None
+        if self.Proc_config['treading_mode'] == 'full':
+            self.thread_pool = ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix='OlivOS_Plugin_Worker'
+            )
 
     class rx_packet(object):
         def __init__(self, sdk_event):
@@ -155,6 +164,11 @@ class shallow(OlivOS.API.Proc_templet):
                             'OlivOS plugin shallow [{0}] will restart', [self.Proc_name], modelName))
                         # 在运行过 save 指令后，将配置数据库关闭
                         self.database.stop()
+                        # 关闭线程池，不等待任务完成，直接取消待处理的任务
+                        if self.thread_pool is not None:
+                            self.thread_pool.shutdown(wait=False, cancel_futures=True)
+                            self.log(2, OlivOS.L10NAPI.getTrans(
+                                'OlivOS plugin shallow [{0}] thread pool shutdown (cancelled pending tasks)', [self.Proc_name], modelName))
                     elif rx_packet_data.action == 'update_hit' and self.Proc_config['enable_auto_restart']:
                         self.Proc_config['ready_for_restart'] = True
                         self.run_plugin_func(None, 'save')
@@ -162,15 +176,23 @@ class shallow(OlivOS.API.Proc_templet):
                                                          block=False)
                         # 在运行过 save 指令后，将配置数据库关闭
                         self.database.stop()
+                        # 关闭线程池，不等待任务完成，直接取消待处理的任务
+                        if self.thread_pool is not None:
+                            self.thread_pool.shutdown(wait=False, cancel_futures=True)
+                            self.log(2, OlivOS.L10NAPI.getTrans(
+                                'OlivOS plugin shallow [{0}] thread pool shutdown (cancelled pending tasks)', [self.Proc_name], modelName))
                     elif rx_packet_data.action == 'send':
                         self.menu_queue.append(rx_packet_data)
                 else:
                     if self.Proc_config['treading_mode'] == 'none':
                         self.run_plugin(rx_packet_data.sdk_event)
                     elif self.Proc_config['treading_mode'] == 'full':
-                        t_run_plugin = None
-                        t_run_plugin = threading.Thread(target=self.run_plugin, args=(rx_packet_data.sdk_event,))
-                        t_run_plugin.start()
+                        # 使用线程池提交任务，而不是直接创建线程
+                        if self.thread_pool is not None:
+                            self.thread_pool.submit(self.run_plugin, rx_packet_data.sdk_event)
+                        else:
+                            # 如果线程池未初始化，回退到直接执行
+                            self.run_plugin(rx_packet_data.sdk_event)
                 if self.Proc_config['enable_auto_restart']:
                     rx_count += 1
                     if rx_count == self.Proc_config['step_to_restart']:

@@ -185,6 +185,8 @@ _  / / /_  /  __  / __ | / /_  / / /____ \
                         tmp_tx_queue_list = []
                         for tmp_tx_queue_list_this in basic_conf_models_this['tx_queue']:
                             tmp_tx_queue_list.append(multiprocessing_dict[tmp_tx_queue_list_this])
+                        # 获取max_workers配置，如果没有则使用默认值50
+                        max_workers = basic_conf_models_this.get('max_workers', 50)
                         Proc_dict[basic_conf_models_this['name']] = OlivOS.pluginAPI.shallow(
                             Proc_name=basic_conf_models_this['name'],
                             scan_interval=basic_conf_models_this['interval'],
@@ -198,7 +200,8 @@ _  / / /_  /  __  / __ | / /_  / / /____ \
                             bot_info_dict=plugin_bot_info_dict,
                             treading_mode=basic_conf_models_this['treading_mode'],
                             restart_gate=basic_conf_models_this['restart_gate'],
-                            enable_auto_restart=basic_conf_models_this['enable_auto_restart']
+                            enable_auto_restart=basic_conf_models_this['enable_auto_restart'],
+                            max_workers=max_workers
                         )
                         if True or 'auto' == tmp_proc_mode_raw:
                             tmp_proc_mode = 'processing'

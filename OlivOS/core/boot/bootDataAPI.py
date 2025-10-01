@@ -261,6 +261,7 @@ default_Conf = {
             "control_queue": "OlivOS_control_queue",
             "logger_proc": "OlivOS_logger",
             "treading_mode": "full",
+            "max_workers": 50,
             "restart_gate": 10000,
             "enable_auto_restart": True,
             "debug": False
